@@ -15,13 +15,15 @@
 		<SVGTouchCanvas
 			viewBox="-1.1 -1.1 2.2 2.2"
 			fill="white"
+			stroke-width="0.002"
+			stroke="white"
 		>
 			<SVGShapes shapes={shapes.value} />
 		</SVGTouchCanvas>
 	</div>
 
 	<div class="float-bottom">
-		<button disabled={fold.isEmpty} onclick={computeFlatState}>flatten</button>
+		<button disabled={fold.isEmpty} onclick={computeFlatState}>embed</button>
 	</div>
 </div>
 
