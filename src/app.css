@@ -50,3 +50,15 @@ button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
+button[disabled]:hover {
+  border-color: transparent;
+}
+button[disabled:focus,
+button[disabled:focus-visible {
+  outline: unset;
+}
+
+
+svg circle {
+	stroke: none;
+}

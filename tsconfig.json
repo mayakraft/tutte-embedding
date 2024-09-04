@@ -19,6 +19,10 @@
 		],
 		"module": "ESNext",
 		"noEmit": true,
-		"target": "ESNext"
+		"target": "ESNext",
+		"exclude": [
+			"/node_modules/",
+			"./node_modules/"
+		]
   }
 }

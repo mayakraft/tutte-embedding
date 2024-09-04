@@ -6,8 +6,6 @@ import { objToFold } from "rabbit-ear/convert/objToFold.js";
  */
 let fileString = $state<string>("");
 
-const emptyFOLD = () => ({});
-
 /**
  * @description The FOLD file object
  */
@@ -19,9 +17,21 @@ export const fold = (() => {
 			return {};
 		}
 	});
+
+	const isEmpty = $derived.by(() => {
+		try {
+			return JSON.stringify(value) === JSON.stringify({});
+		} catch (err) {
+			return true;
+		}
+	});
+
 	return {
 		get value() {
 			return value;
+		},
+		get isEmpty() {
+			return isEmpty;
 		},
 	};
 })();
