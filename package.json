@@ -12,13 +12,17 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^3.1.1",
     "@tsconfig/svelte": "^5.0.4",
-    "earcut": "^2.2.4",
     "prettier": "^3.3.3",
-    "rabbit-ear": "../../rabbit-ear/",
     "svelte": "^5.0.0-next.243",
     "svelte-check": "^3.8.5",
     "tslib": "^2.6.3",
     "typescript": "^5.5.3",
     "vite": "^5.4.1"
+  },
+  "dependencies": {
+  	"earcut": "^2.2.4",
+    "mathjs": "^13.1.1",
+    "qr-solve": "^0.1.0",
+    "rabbit-ear": "../../rabbit-ear/"
   }
 }

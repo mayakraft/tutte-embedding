@@ -3,7 +3,9 @@ import { boundaries as Boundaries } from "rabbit-ear/graph/boundary.js";
 import { connectedComponentsPairs } from "rabbit-ear/graph/connectedComponents.js";
 import { makeEdgesFaces } from "rabbit-ear/graph/make/edgesFaces.js";
 import { makeFacesFaces } from "rabbit-ear/graph/make/facesFaces.js";
+import { invertFlatMap } from "rabbit-ear/graph/maps.js";
 import { add2, normalize2 } from "rabbit-ear/math/vector.js";
+import qrSolve from "qr-solve";
 import { fold } from "./file.svelte.ts";
 import type { Shape } from "../general/shapes.ts";
 
@@ -68,6 +70,9 @@ type EmbeddedFace = {
 
 export const computeTutte = () => {
 	const graph = $state.snapshot(fold.value) as FOLD;
+	if (!graph.faces_vertices) {
+		return;
+	}
 	graph.edges_faces = makeEdgesFaces(graph);
 	graph.faces_faces = makeFacesFaces(graph);
 	// we can remove empty items, we don't need to match winding
@@ -88,80 +93,98 @@ export const computeTutte = () => {
 		.map((e) => graph.edges_faces[e][0])
 		.filter((a) => a != null);
 
-	// create a breadth first tree where the first row is all
-	// of the boundary faces
-	const tree = bfTree(faces_faces, boundaryFaces);
+	const isBoundaryFace = invertFlatMap(boundaryFaces).map(() => true);
 
 	// the first row of boundary faces will be spread out evenly around the circle
-	const firstEmbedRow = tree[0].map((face, i) => ({
-		face,
-		angle: (i / boundaryFaces.length) * Math.PI * 2,
-		radius: 1,
-	}));
+	const coords: [number, number][] = [];
+	boundaryFaces.forEach((face, i) => {
+		const angle = (i / boundaryFaces.length) * Math.PI * 2;
+		coords[face] = [Math.cos(angle), Math.sin(angle)];
+	});
 
-	// tree map contains a lookup, for every face, which level / depth
-	// in the bf tree does this face lie?
-	const treeMap: { [key: number]: number } = {};
-	tree.forEach((faces, i) =>
-		faces.forEach((f) => {
-			treeMap[f] = i;
-		}),
-	);
+	const numFaces = graph.faces_vertices.length;
+	const matrixRowCount = 2 * (numFaces - boundaryFaces.length);
 
-	// this is the final embedding we are building, a list of face entities,
-	// each face contains an embedding location (angle and radius)
-	const embedding = [...firstEmbedRow];
+	const a: [number, number, number][] = [];
+	const b = Array.from(Array(matrixRowCount)).fill(0);
 
-	// a reverse lookup for each face, which index is it in the embedding
-	const embedMap: { [key: number]: number } = {};
-	firstEmbedRow.forEach(({ face }, i) => (embedMap[face] = i));
-
-	Array.from(Array(tree.length - 1))
-		.map((_, i) => i + 1)
-		.map((i) => {
-			const thisEmbedding: EmbeddedFace[] = [];
-			const radius = 1 - i / tree.length;
-			tree[i].forEach((face) => {
-				// for each row in the tree, get all adjacent faces which are already
-				// in the embedding (tree map index < this index)
-				const prevAdjacentFaces = faces_faces[face].filter((f) => treeMap[f] < i);
-				// set this face's angle to be the average of all of the parent face's angles
-				const angles = prevAdjacentFaces.map((f) => {
-					return embedding[embedMap[f]].angle;
-				});
-				const angle = averageAngles(angles);
-				thisEmbedding.push({ face, angle, radius });
-			});
-			// update the embedMap for the index location (where the face will be)
-			thisEmbedding.forEach(({ face }, j) => {
-				embedMap[face] = embedding.length + j;
-			});
-			// add faces to the embedding
-			embedding.push(...thisEmbedding);
+	// for every interior vertex, assign variable index backmap[vertexid]
+	const backmap: number[] = [];
+	let i = 0;
+	Array.from(Array(numFaces))
+		.map((_, face) => face)
+		.filter((face) => !isBoundaryFace[face])
+		.forEach((face) => {
+			backmap[face] = i++;
 		});
 
-	// draw diagram
-	// all of the circles (faces)
-	shapes.value = embedding
-		.map(({ angle: a, radius: r }) => [r * Math.cos(a), r * Math.sin(a)])
-		.map(([cx, cy]) => ({ name: "circle", params: { cx, cy, r: 0.01 } }));
+	// fill matrix with values
+	for (let vid = 0; vid < numFaces; vid++) {
+		if (isBoundaryFace[vid]) {
+			continue;
+		}
+		// index of variable corresponding to x coordinate is 2 * backmap[vid]
+		// index of variable corresponding to y coordinate is 2 * backmap[vid] + 1
+		a.push([2 * backmap[vid], 2 * backmap[vid], 1.0]);
+		a.push([2 * backmap[vid] + 1, 2 * backmap[vid] + 1, 1.0]);
 
-	// all of the lines (connections between adjacent faces)
+		// n nonboundary neighbours
+		// m boundary neighbours
+		// x = (... n2_x, n2_y ....  p_x, p_y,..... n1_x, n1_y ... )
+		// a * x = b
+		//  (p_x, p_y) - 1/n( (n1_x, n1_y) + .... + (nk_x, nk_y)) = 1/n *((m1_x, m1_y) +... + (ml_x,ml_y))
+
+		// each row corresponds to an equation. row 1 is equation 1
+		// iterate over all neighbours
+		const neighbors = faces_faces[vid];
+
+		neighbors
+			.filter((nvid) => isBoundaryFace[nvid])
+			.forEach((nvid) => {
+				b[2 * backmap[vid]] += (1.0 / neighbors.length) * coords[nvid][0];
+				b[2 * backmap[vid] + 1] += (1.0 / neighbors.length) * coords[nvid][1];
+			});
+
+		neighbors
+			.filter((nvid) => !isBoundaryFace[nvid])
+			.forEach((nvid) => {
+				a.push([2 * backmap[vid], 2 * backmap[nvid], -1.0 / neighbors.length]);
+				a.push([2 * backmap[vid] + 1, 2 * backmap[nvid] + 1, -1.0 / neighbors.length]);
+			});
+	}
+
+	a.sort((row, col) => (row[0] === col[0] ? row[1] - col[1] : row[0] - col[0]));
+
+	// solve a*x = b
+	const solve = qrSolve.prepare(a, matrixRowCount, matrixRowCount);
+	const solution = new Float64Array(matrixRowCount);
+	solve(b, solution);
+
+	backmap.forEach((i, beforeIndex) => {
+		coords[beforeIndex] = [solution[i * 2], solution[i * 2 + 1]];
+	});
+
+	console.log(solution);
+	console.log("boundaryFaces", boundaryFaces);
+	console.log("isBoundaryFace", isBoundaryFace);
+	console.log("backmap", backmap);
+	console.log("a", a);
+	console.log("b", b);
+	console.log("coords", coords);
+
+	const circles = coords.map(([cx, cy]) => ({
+		name: "circle",
+		params: { cx, cy, r: 0.005 },
+	}));
 	const lines = connectedComponentsPairs(faces_faces).map(([f0, f1]) => {
-		const face0 = embedding[embedMap[f0]];
-		const face1 = embedding[embedMap[f1]];
-		const [x1, y1] = [
-			face0.radius * Math.cos(face0.angle),
-			face0.radius * Math.sin(face0.angle),
-		];
-		const [x2, y2] = [
-			face1.radius * Math.cos(face1.angle),
-			face1.radius * Math.sin(face1.angle),
-		];
+		const [x1, y1] = coords[f0];
+		const [x2, y2] = coords[f1];
 		return { name: "line", params: { x1, y1, x2, y2 } };
 	});
 
+	shapes.value = [];
 	shapes.value.push(...lines);
+	shapes.value.push(...circles);
 };
 
 export const computeFlatState = () => {

@@ -16,7 +16,7 @@
 			viewBox="-1.1 -1.1 2.2 2.2"
 			fill="white"
 			stroke-width="0.002"
-			stroke="white"
+			stroke="#158"
 		>
 			<SVGShapes shapes={shapes.value} />
 		</SVGTouchCanvas>
