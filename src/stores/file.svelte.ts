@@ -1,5 +1,6 @@
 import { type FOLD } from "rabbit-ear/types.js";
 import { objToFold } from "rabbit-ear/convert/objToFold.js";
+import { computeFlatState } from "./tutte.svelte.ts";
 
 /**
  * @description Literally, just the contents of the file as a string
@@ -24,6 +25,13 @@ export const fold = (() => {
 		} catch (err) {
 			return true;
 		}
+	});
+
+	$effect.root(() => {
+		$effect(() => {
+			computeFlatState(value);
+		});
+		return () => {};
 	});
 
 	return {

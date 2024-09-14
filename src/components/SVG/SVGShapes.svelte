@@ -4,10 +4,12 @@
 	type PropsType = {
 		// shapes: SVGElement[],
 		shapes: Shape[],
+		vmax?: number,
 	};
 
 	const {
 		shapes,
+		vmax,
 		...rest
 	}: PropsType = $props();
 

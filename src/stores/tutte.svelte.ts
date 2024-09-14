@@ -1,82 +1,18 @@
 import type { FOLD } from "rabbit-ear/types.js";
 import { boundaries as Boundaries } from "rabbit-ear/graph/boundary.js";
-import { connectedComponentsPairs } from "rabbit-ear/graph/connectedComponents.js";
-import { makeEdgesFaces } from "rabbit-ear/graph/make/edgesFaces.js";
-import { makeFacesFaces } from "rabbit-ear/graph/make/facesFaces.js";
 import { invertFlatMap } from "rabbit-ear/graph/maps.js";
-import { add2, normalize2 } from "rabbit-ear/math/vector.js";
 import qrSolve from "qr-solve";
-import { fold } from "./file.svelte.ts";
-import type { Shape } from "../general/shapes.ts";
+import { embedding } from "./embedding.svelte.ts";
 
-const averageAngles = (angles: number[]) => {
-	const vectorSum = angles
-		.map((a) => [Math.cos(a), Math.sin(a)] as [number, number])
-		.reduce((a, b) => add2(a, b), [0, 0]);
-	const vector = normalize2(vectorSum);
-	return Math.atan2(vector[1], vector[0]);
-};
-
-export const shapes = (() => {
-	let value: Shape[] = $state([]);
-	return {
-		get value() {
-			return value;
-		},
-		set value(v) {
-			value = v;
-		},
-	};
-})();
-
-const walkFaces = (
-	faces_faces: (number | null | undefined)[][],
-	row: number[],
-	visited: { [key: number]: boolean },
-) => {
-	const nextRowWithDuplicates = row.flatMap((face) =>
-		faces_faces[face].filter((a) => a != null).filter((f) => !visited[f]),
-	);
-	const nextRow = Array.from(new Set(nextRowWithDuplicates));
-	nextRow.forEach((f) => {
-		visited[f] = true;
-	});
-	return nextRow;
-};
-
-const bfTree = (faces_faces: (number | null | undefined)[][], firstRow: number[]) => {
-	const visited: { [key: number]: boolean } = {};
-	const tree = [firstRow];
-	firstRow.forEach((f) => (visited[f] = true));
-	let prevRow = firstRow;
-	let nextRow;
-	do {
-		nextRow = walkFaces(faces_faces, prevRow, visited);
-		if (!nextRow.length) {
-			return tree;
-		}
-		tree.push(nextRow);
-		prevRow = nextRow;
-	} while (true);
-};
-
-type EmbeddedFace = {
-	face: number; // this face's index
-	// faces: number[]; // adjacent faces
-	angle: number;
-	radius: number;
-	// coords: [number, number];
-};
-
-export const computeTutte = () => {
-	const graph = $state.snapshot(fold.value) as FOLD;
-	if (!graph.faces_vertices) {
+const computeTutte = (fold: FOLD) => {
+	const graph = $state.snapshot(fold) as FOLD;
+	if (!graph.vertices_coords) {
 		return;
 	}
-	graph.edges_faces = makeEdgesFaces(graph);
-	graph.faces_faces = makeFacesFaces(graph);
+	// graph.edges_faces = makeEdgesFaces(graph);
+	// graph.faces_faces = makeFacesFaces(graph);
 	// we can remove empty items, we don't need to match winding
-	const faces_faces = graph.faces_faces.map((faces) => faces.filter((a) => a != null));
+	// const faces_faces = graph.faces_faces.map((faces) => faces.filter((a) => a != null));
 
 	// get all boundary edges, use these to get the boundary faces
 	const boundaries = Boundaries(graph);
@@ -87,23 +23,23 @@ export const computeTutte = () => {
 		throw new Error("too many boundaries");
 	}
 	const [boundary] = boundaries;
-	const { edges: boundaryEdges } = boundary;
+	const { vertices: boundaryVertices, edges: boundaryEdges } = boundary;
 
-	const boundaryFaces = boundaryEdges
-		.map((e) => graph.edges_faces[e][0])
-		.filter((a) => a != null);
+	// const boundaryFaces = boundaryEdges
+	// 	.map((e) => graph.edges_faces[e][0])
+	// 	.filter((a) => a != null);
 
-	const isBoundaryFace = invertFlatMap(boundaryFaces).map(() => true);
+	const isBoundaryVertex = invertFlatMap(boundaryVertices).map(() => true);
 
 	// the first row of boundary faces will be spread out evenly around the circle
 	const coords: [number, number][] = [];
-	boundaryFaces.forEach((face, i) => {
-		const angle = (i / boundaryFaces.length) * Math.PI * 2;
-		coords[face] = [Math.cos(angle), Math.sin(angle)];
+	boundaryVertices.forEach((vertex, i) => {
+		const angle = (i / boundaryVertices.length) * Math.PI * 2;
+		coords[vertex] = [Math.cos(angle), Math.sin(angle)];
 	});
 
-	const numFaces = graph.faces_vertices.length;
-	const matrixRowCount = 2 * (numFaces - boundaryFaces.length);
+	const numVertices = graph.vertices_coords.length;
+	const matrixRowCount = 2 * (numVertices - boundaryVertices.length);
 
 	const a: [number, number, number][] = [];
 	const b = Array.from(Array(matrixRowCount)).fill(0);
@@ -111,16 +47,16 @@ export const computeTutte = () => {
 	// for every interior vertex, assign variable index backmap[vertexid]
 	const backmap: number[] = [];
 	let i = 0;
-	Array.from(Array(numFaces))
-		.map((_, face) => face)
-		.filter((face) => !isBoundaryFace[face])
-		.forEach((face) => {
-			backmap[face] = i++;
+	Array.from(Array(numVertices))
+		.map((_, vertex) => vertex)
+		.filter((vertex) => !isBoundaryVertex[vertex])
+		.forEach((vertex) => {
+			backmap[vertex] = i++;
 		});
 
 	// fill matrix with values
-	for (let vid = 0; vid < numFaces; vid++) {
-		if (isBoundaryFace[vid]) {
+	for (let vid = 0; vid < numVertices; vid++) {
+		if (isBoundaryVertex[vid]) {
 			continue;
 		}
 		// index of variable corresponding to x coordinate is 2 * backmap[vid]
@@ -136,17 +72,17 @@ export const computeTutte = () => {
 
 		// each row corresponds to an equation. row 1 is equation 1
 		// iterate over all neighbours
-		const neighbors = faces_faces[vid];
+		const neighbors = graph.vertices_vertices[vid];
 
 		neighbors
-			.filter((nvid) => isBoundaryFace[nvid])
+			.filter((nvid) => isBoundaryVertex[nvid])
 			.forEach((nvid) => {
 				b[2 * backmap[vid]] += (1.0 / neighbors.length) * coords[nvid][0];
 				b[2 * backmap[vid] + 1] += (1.0 / neighbors.length) * coords[nvid][1];
 			});
 
 		neighbors
-			.filter((nvid) => !isBoundaryFace[nvid])
+			.filter((nvid) => !isBoundaryVertex[nvid])
 			.forEach((nvid) => {
 				a.push([2 * backmap[vid], 2 * backmap[nvid], -1.0 / neighbors.length]);
 				a.push([2 * backmap[vid] + 1, 2 * backmap[nvid] + 1, -1.0 / neighbors.length]);
@@ -164,32 +100,34 @@ export const computeTutte = () => {
 		coords[beforeIndex] = [solution[i * 2], solution[i * 2 + 1]];
 	});
 
-	console.log(solution);
-	console.log("boundaryFaces", boundaryFaces);
-	console.log("isBoundaryFace", isBoundaryFace);
-	console.log("backmap", backmap);
-	console.log("a", a);
-	console.log("b", b);
-	console.log("coords", coords);
+	// console.log(graph);
+	// console.log(solution);
+	// console.log("boundaryVertices", boundaryVertices);
+	// console.log("isBoundaryVertex", isBoundaryVertex);
+	// console.log("backmap", backmap);
+	// console.log("a", a);
+	// console.log("b", b);
+	// console.log("coords", coords);
 
-	const circles = coords.map(([cx, cy]) => ({
-		name: "circle",
-		params: { cx, cy, r: 0.005 },
-	}));
-	const lines = connectedComponentsPairs(faces_faces).map(([f0, f1]) => {
-		const [x1, y1] = coords[f0];
-		const [x2, y2] = coords[f1];
-		return { name: "line", params: { x1, y1, x2, y2 } };
-	});
+	// const circles = coords.map(([cx, cy]) => ({
+	// 	name: "circle",
+	// 	params: { cx, cy, r: 0.005 },
+	// }));
+	// const lines = connectedComponentsPairs(graph.vertices_vertices).map(([f0, f1]) => {
+	// 	const [x1, y1] = coords[f0];
+	// 	const [x2, y2] = coords[f1];
+	// 	return { name: "line", params: { x1, y1, x2, y2 } };
+	// });
 
-	shapes.value = [];
-	shapes.value.push(...lines);
-	shapes.value.push(...circles);
+	embedding.graph = {
+		...graph,
+		vertices_coords: coords,
+	};
 };
 
-export const computeFlatState = () => {
+export const computeFlatState = (fold: FOLD) => {
 	try {
-		computeTutte();
+		computeTutte(fold);
 	} catch (err) {
 		alert(err);
 	}
